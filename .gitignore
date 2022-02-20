@@ -1,3 +1,5 @@
 node_modules
 config.json
 queues.txt
+*Cache.json
+.\vscode

@@ -1,3 +1,5 @@
+//const LocalStorage = require("./helpers/local-storage-helper.js")
+
 // All of the Node.js APIs are available in the preload process.
 // It has the same sandbox as a Chrome extension.
 var {
@@ -12,12 +14,20 @@ const connector = new LCUConnector()
 const exec = require("child_process").exec
 const fs = require("fs")
 const path = require("path")
+const JSONStream = require( "JSONStream" );
+const json = require("big-json")
+
+//global cache
+let cacheLoaded = false;
+let friendsCache = {};
+let matchesCache = {};
 
 // default config
-let config = {
+/*let config = {
     hider: true
-}
+}*/
 
+/*
 // Attribute roles to players
 const positionRoles = (first, second, id) => {
     if (first == "FILL") second = "FILL"
@@ -299,14 +309,192 @@ const mainMenu = () => {
 
     //Special (urf) = 900
 }
+*/
+//let menu = false
 
-let menu = false
+// Refresh Friend History
+function refreshMatchHistory() {    
+    setTimeout(async () => {        
+        for (const [puuid, summoner] of Object.entries(friendsCache)) {
+            requestCount = 0;
+            console.log("History")
+            console.log(JSON.stringify(summoner));
+            if (!(puuid in matchHistoryCache)) {
+                matchHistory = {}
+                matchHistory["puuid"] = puuid
+                matchHistory["matches"] = []
+                matchHistory["lastUpdate"] = 0
+                matchHistory["fullHistory"] = false
+                matchHistoryCache[puuid] = matchHistory
+            }
+
+            //Checks if matches has been updated in the last 20 minutes
+            console.log(matchHistory["lastUpdate"])
+            if(Date.now() - matchHistory["lastUpdate"] < 1200000) {
+                console.log("Match history for " + summoner["name"] + " is up to date");
+                return
+            } else {
+                if(!("gameName" in summoner["friendData"])) {
+                    console.log("Sem gamename");
+                    console.log(summoner);
+                }
+                console.log("Updating Matches For: " + summoner["friendData"]["gameName"])
+                doneUpdating = false
+                begIndex = 0
+                endIndex = 200                
+                do {
+                    console.log("BegIndex: " + begIndex + " EndIndex: " + endIndex)
+                    await get("/lol-match-history/v1/products/lol/"+ puuid + "/matches?begIndex=" + begIndex + "&endIndex=" + endIndex).then(res => {
+                        requestCount++;
+                        console.log("Got Match History for " + summoner["friendData"]["gameName"])                        
+                        //console.log(res)
+                        //console.log(JSON.stringify(res))
+                        if("games" in res) {
+                            games = res["games"]["games"]
+                        } else {
+                            games = []
+                            console.error("No Game Data Found")
+                            doneUpdating = true;
+                            return;
+                        }
+                        if (games.length == 0) {
+                            console.log("No More Games For " + summoner["friendData"]["gameName"] + "! " + requestCount + " Requests")
+                            doneUpdating = true;
+                            matchHistory["lastUpdate"] = Date.now()
+                            matchHistory["fullHistory"] = true
+                            saveCache();
+                            return;
+                        }
+                        games.forEach(game => {
+                            if(!(game["gameId"] in matchHistory["matches"])) {
+                                matchHistory["matches"][game["gameId"]] = game
+                            } else {
+                                if (matchHistory["fullHistory"]) {
+                                    doneUpdating = true;
+                                    return;
+                                } 
+                            }                            
+			
+                            matchSummonerName = game["participantIdentities"][0]["player"]["summonerName"]
+                            if(!(matchSummonerName in summoner["previousNames"])) {
+                			    summoner["previousNames"][matchSummonerName] = {
+                                    firstSeen: game["gameCreationDate"],
+                                    lastSeen: game["gameCreationDate"]
+                                }
+                            } else {
+                                if (game["gameCreationDate"] > summoner["previousNames"][matchSummonerName]["lastSeen"]) {
+                                    summoner["previousNames"][matchSummonerName]["lastSeen"] = game["gameCreationDate"]
+                                }
+                                if (game["gameCreationDate"] < summoner["previousNames"][matchSummonerName]["firstSeen"]) {
+                                    summoner["previousNames"][matchSummonerName]["firstSeen"] = game["gameCreationDate"]
+                                }
+                            }
+                        })
+                        begIndex += 200
+                        endIndex += 200
+                    }).catch(err => {
+                        console.log(err)
+                    });
+
+                } while (!doneUpdating);
+            }            
+            
+        };
+        //refreshMatchHistory();
+    }, 1000);
+        
+
+    /*
+		gamesList = await getRequest(conn, f'/lol-match-history/v1/products/lol/{puuid}/matches?begIndex={begIndex}&endIndex={endIndex}')
+		if gamesList is None:
+			break
+		if len(gamesList["games"]["games"]) == 0:
+			break
+		
+		for game in gamesList["games"]["games"]:
+			previousNames.add(game["participantIdentities"][0]["player"]["summonerName"])
+
+		begIndex += 200
+		endIndex += 200*/
+	return null
+}
+function refreshFriend(friend) {
+    sid = friend['id']
+    puuid = friend['puuid']
+    summonerId = friend['summonerId']
+    
+    summoner = {
+        friendData: friend,
+        previousNames: {},
+        createDate: new Date(),
+        lastUpdate: new Date()
+    }
+    if (!(friendsCache.constructor === Object)) {
+        friendsCache = {}
+    }
+    if (!(puuid in friendsCache)) {
+        friendsCache[puuid] = summoner
+    } else {
+        friendsCache[puuid]["friendData"] = summoner["friendData"];
+        friendsCache[puuid]["createDate"] = summoner["createDate"];
+        friendsCache[puuid]["lastUpdate"] = new Date();
+    }
+}
+
+const keepFriendsUpdated = async () => {
+    //Keep refreshing friends
+    setInterval(() => {
+        console.log("Getting friends")
+        get("/lol-chat/v1/friends").then(res => {
+            if (res.code == "ECONNREFUSED") {
+
+            }
+            if (res.httpStatus == 404) {
+                /*if (!menu) {
+                    mainMenu()
+                    lobbyIds.length = 0
+                    riotIds.length = 0
+                    document.getElementById("friends").style.display = "none"
+                    document.querySelectorAll(".friend").forEach(e => {
+                        e.remove()
+                    })
+                }
+                return menu = true
+                */
+            }
+            // menu = false
+                res.forEach(friend => {
+                    refreshed = refreshFriend(friend)
+                });
+            /*get("/lol-lobby/v2/lobby/members").then(res => {
+            })*/
+        });
+        //LocalStorage.ClearStorage("FriendsCache")
+        //LocalStorage.LocalStoreList("FriendsCache", friendsCache, 30)
+    }, 5000)
+}
 
 // Connect to LCU event
 connector.on('connect', (data) => {
+    console.log("Connected to LCU")
     console.log(data)
     window.auth = data
+    //LocalStorage.ClearStorage("FriendsCache");
+    //return;
+    //friendsCache =  LocalStorage.GetLocalStorageData("FriendsCache")
 
+
+    loadCache(); //Loads the cache from local storage and refreshes the friends
+
+    /*console.log("Size " + Object.keys(friendsCache).length)
+    if (Object.keys(friendsCache).length > 0) {
+        friendsCache = friendsCache[0].value
+    } else {
+        friendsCache = {}
+    }*/
+    
+
+    /*
     setInterval(() => {
         get("/lol-lobby/v2/lobby").then(res => {
             if (res.code == "ECONNREFUSED") {
@@ -378,13 +566,14 @@ connector.on('connect', (data) => {
         })
 
     }, 1000)
+    */
 
     document.getElementById("container").style.display = "flex"
     document.getElementById("waiting").style.display = "none"
     const node = document.getElementById("window")
     node.replaceWith(...node.childNodes);
     document.getElementById("waiting").remove()
-
+    /*
     document.getElementById("find-match").addEventListener("click", e => {
         post("/lol-lobby/v2/lobby/matchmaking/search").then(res => {
             if (!stat(res)) return
@@ -408,10 +597,10 @@ connector.on('connect', (data) => {
             document.getElementById("cancel").style.display = "none"
             document.getElementById("leave").style.display = "none"
         })
-    })
-
+    })*/
+    
     // console.log(config.hider)
-    hider(config.hider ? 0 : 5)
+    //hider(config.hider ? 0 : 5)
 })
 
 // Check if request status is ok
@@ -424,7 +613,126 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById("container").style.display = "none"
 })
 
-const saveConfig = () => {
+const saveCache = () => {
+    //console.log("Going to save cache")
+    //console.log(friendsCache)
+
+    var transformStream_friends = JSONStream.stringify();
+    var outputStream_friends = fs.createWriteStream( __dirname + "/friendsCache.json" );
+
+    var transformStream_matches = JSONStream.stringify();
+    var outputStream_matches = fs.createWriteStream( __dirname + "/matchesCache.json" );
+
+    // In this case, we're going to pipe the serialized objects to a data file.
+    transformStream_friends.pipe( outputStream_friends );
+    transformStream_matches.pipe( outputStream_matches );
+    
+    // Iterate over the records and write EACH ONE to the TRANSFORM stream individually.
+    // --
+    // NOTE: If we had tried to write the entire record-set in one operation, the output
+    // would be malformed - it expects to be given items, not collections.
+    console.log("Saving:")
+    console.log(friendsCache)
+
+    Object.values(matchesCache).forEach( transformStream_matches.write );
+    Object.values(friendsCache).forEach( transformStream_friends.write );
+    
+    // Once we've written each record in the record-set, we have to end the stream so that
+    // the TRANSFORM stream knows to output the end of the array it is generating.
+    transformStream_matches.end();
+    transformStream_friends.end();
+    
+    // Once the JSONStream has flushed all data to the output stream, let's indicate done.
+    outputStream_matches.on(
+        "finish",
+        function handleFinish() {
+            console.log("Matches Cache saved")    
+        }
+    );
+    outputStream_friends.on(
+        "finish",
+        function handleFinish() {
+            console.log("Friends Cache Saved")    
+        }
+    );
+
+    /*
+    const stringifyStream = json.createStringifyStream({
+        body: lodash.cloneDeep(friendsCache)
+    });*/
+    
+    /*stringifyStream.on('data', function(strChunk) {
+        // => BIG_POJO will be sent out in JSON chunks as the object is traversed
+        console.log("Writing");
+        console.log(strChunk);
+        fs.writeFile("friendsCache.json", strChunk, () => {
+            console.log("Cache saved")
+        })
+    });*/
+        
+    
+}
+
+const loadCache = () => {
+    if (!fs.existsSync("friendsCache.json")) fs.writeFileSync("friendsCache.json", "");
+    const readStream_friends = fs.createReadStream('friendsCache.json');
+    const parseStream_friends = json.createParseStream();
+
+    if (!fs.existsSync("matchesCache.json")) fs.writeFileSync("matchesCache.json", "");
+    const readStream_matches = fs.createReadStream('matchesCache.json');
+    const parseStream_matches = json.createParseStream();
+
+    
+    parseStream_friends.on('data', function(pojo) {
+        // => receive reconstructed POJO
+        console.log("Friends Cache loaded")
+        console.log(pojo);
+        for (let key in pojo) {
+            friendsCache[pojo[key]["friendData"]["puuid"]] = pojo[key]
+        }
+        //friendsCache = pojo[0]
+        //Tests if friendsCache is undefined
+        if (friendsCache == undefined) {
+            friendsCache = {}
+        }
+        cacheLoaded = true
+
+        //console.log("Friends Cache")
+        console.log(friendsCache)
+    
+        keepFriendsUpdated()    
+    });
+    
+    readStream_friends.pipe(parseStream_friends);
+
+    parseStream_matches.on('data', function(pojo) {
+        // => receive reconstructed POJO
+        console.log("Matches Cache loaded")
+        console.log(pojo);
+        for (let key in pojo) {
+            matchesCache[pojo[key]["puuid"]] = pojo[key]
+        }
+        //friendsCache = pojo[0]
+        //Tests if friendsCache is undefined
+        if (matchesCache == undefined) {
+            matchesCache = {}
+        }
+        cacheLoaded = true
+
+        //console.log("Friends Cache")
+        console.log(matchesCache)
+    
+        
+        refreshMatchHistory()
+    
+    });
+    
+    readStream.pipe(parseStream);    
+
+}
+
+
+/*const saveConfig = () => {
     fs.writeFile("config.json", JSON.stringify(config), () => {
         console.log("Config saved")
     })
@@ -438,7 +746,8 @@ const loadConfig = () => {
         if (err) return err
         config = JSON.parse(data)
     })
-}
+}*/
+
 
 // Load config
 loadConfig()

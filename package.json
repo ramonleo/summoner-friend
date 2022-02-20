@@ -10,6 +10,10 @@
     },
     "dependencies": {
         "lcu-connector": "^2.1.3",
-        "node-fetch": "^1.7.3"
+        "node-fetch": "^1.7.3",
+        "crypto-js": "latest",
+        "date-fns": "latest",
+        "big-json": "latest",
+        "JSONStream": "latest"
     }
 }
