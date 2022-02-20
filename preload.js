@@ -55,7 +55,7 @@ function refreshMatchHistory() {
                 
                 do {
                     //waits 1 second between requests
-                    await sleep(1000);
+                            await sleep(2000);
                     console.log("BegIndex: " + begIndex + " EndIndex: " + endIndex)
                     await get("/lol-match-history/v1/products/lol/"+ puuid + "/matches?begIndex=" + begIndex + "&endIndex=" + endIndex).then(res => {
                         requestCount++;
