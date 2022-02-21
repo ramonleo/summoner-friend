@@ -16,7 +16,7 @@ const fs = require("fs")
 const path = require("path")
 const JSONStream = require( "JSONStream" );
 const json = require("big-json")
-
+const FriendsElements = require("./components/friends-elements.js")
 //global cache
 let cacheLoaded = false;
 let friendsCache = {};
@@ -158,6 +158,11 @@ const keepFriendsUpdated = async () => {
             }
             res.forEach(friend => {
                 refreshed = refreshFriend(friend)
+            });
+            friendListElement = document.getElementById("friend-list")
+            friendListElement.innerHTML = ""
+            FriendsElements.FriendListHtmlElements(Object.values(friendsCache)).forEach(element => {
+                friendListElement.appendChild(element)
             });
         });
     }, 5000)
